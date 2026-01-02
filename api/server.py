@@ -27,4 +27,12 @@ def scan(request: ScanRequest):
 
     similarities = [
         cosine_similarity(query_vec, doc_vec)
-        for doc
+        for doc_vec in doc_vectors
+    ]
+
+    return {
+        "status": "ok",
+        "num_docs": len(request.retrieved_texts),
+        "similarity_scores": similarities,
+        "mean_similarity": float(np.mean(similarities)) if similarities else 0.0
+    }
