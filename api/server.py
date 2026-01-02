@@ -34,6 +34,24 @@ def analyze_distribution(similarities):
         "health": health
     }
 
+def redundancy_score(doc_vectors):
+    if len(doc_vectors) < 2:
+        return {"score": 0.0, "level": "low"}
+
+    sims = []
+    for i in range(len(doc_vectors)):
+        for j in range(i + 1, len(doc_vectors)):
+            sims.append(cosine_similarity(doc_vectors[i], doc_vectors[j]))
+
+    avg_sim = float(np.mean(sims)) if sims else 0.0
+    level = "high" if avg_sim > 0.85 else "low"
+
+    return {
+        "score": avg_sim,
+        "level": level
+    }
+
+
 
 def dummy_embed(text: str) -> np.ndarray:
     """
@@ -57,11 +75,15 @@ def scan(request: ScanRequest):
     ]
 
     dist = analyze_distribution(similarities)
+    redundancy = redundancy_score(doc_vectors)
+
 
 
     return {
         "status": "ok",
         "num_docs": len(request.retrieved_texts),
         "similarity_scores": similarities,
-        "distribution": dist
+        "distribution": dist,
+        "redundancy": redundancy
+
     }
