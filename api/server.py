@@ -4,6 +4,11 @@ from typing import List
 import numpy as np
 import os
 from enum import Enum
+from collections import deque
+
+BASELINE_WINDOW = int(os.getenv("BASELINE_WINDOW", 50))
+baseline_buffer = deque(maxlen=BASELINE_WINDOW)
+
 
 # Thresholds (env-overridable)
 SIM_STD_COLLAPSE = float(os.getenv("SIM_STD_COLLAPSE", 0.02))
@@ -153,6 +158,30 @@ def drift_check(current_dist, baseline):
         "reasons": reasons
     }
 
+def update_and_get_baseline(dist, decision):
+    if decision is None:
+        return None
+
+    # learn only from healthy decisions
+    if decision["status"] == "ok" and dist["health"] == "healthy":
+        baseline_buffer.append({
+            "mean": dist["mean"],
+            "std": dist["std"]
+        })
+
+    if not baseline_buffer:
+        return None
+
+    mean_vals = [b["mean"] for b in baseline_buffer]
+    std_vals = [b["std"] for b in baseline_buffer]
+
+    return {
+        "mean": float(np.mean(mean_vals)),
+        "std": float(np.mean(std_vals))
+    }
+
+
+
 def dummy_embed(text: str) -> np.ndarray:
     """
     Temporary embedding function.
@@ -177,9 +206,22 @@ def scan(request: ScanRequest):
     dist = analyze_distribution(similarities)
     redundancy = redundancy_score(doc_vectors)
     mismatch = semantic_mismatch(query_vec, doc_vectors)
-    drift = drift_check(dist, request.baseline)
-    decision = decision_engine(dist, redundancy, mismatch,drift)
 
+    # decide FIRST
+    decision = decision_engine(dist, redundancy, mismatch, drift=None)
+
+    # baseline from client OR auto-learned
+    auto_baseline = update_and_get_baseline(dist, decision)
+    baseline = request.baseline or auto_baseline
+
+    # now check drift
+    drift = drift_check(dist, baseline)
+
+    # update decision WITH drift
+    decision = decision_engine(dist, redundancy, mismatch, drift)
+
+
+    
 
 
     return {
