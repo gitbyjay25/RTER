@@ -66,6 +66,28 @@ def semantic_mismatch(query_vec, doc_vectors):
         "mismatch": mismatch
     }
 
+def decision_engine(distribution, redundancy, mismatch):
+    reasons = []
+
+    if mismatch["mismatch"]:
+        reasons.append("semantic mismatch detected")
+
+    if redundancy["level"] == "high":
+        reasons.append("high redundancy in retrieved documents")
+
+    if distribution["health"] == "collapsed":
+        reasons.append("similarity distribution collapsed")
+
+    if reasons:
+        status = "error" if mismatch["mismatch"] else "warn"
+    else:
+        status = "ok"
+
+    return {
+        "status": status,
+        "reasons": reasons
+    }
+
 
 
 
@@ -93,6 +115,7 @@ def scan(request: ScanRequest):
     dist = analyze_distribution(similarities)
     redundancy = redundancy_score(doc_vectors)
     mismatch = semantic_mismatch(query_vec, doc_vectors)
+    decision = decision_engine(dist, redundancy, mismatch)
 
 
 
@@ -102,7 +125,9 @@ def scan(request: ScanRequest):
         "similarity_scores": similarities,
         "distribution": dist,
         "redundancy": redundancy,
-        "semantic_mismatch": mismatch
+        "semantic_mismatch": mismatch,
+        "decision": decision
+
 
 
     }
