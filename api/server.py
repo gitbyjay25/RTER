@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import List
 import numpy as np
 import os
+from enum import Enum
 
 # Thresholds (env-overridable)
 SIM_STD_COLLAPSE = float(os.getenv("SIM_STD_COLLAPSE", 0.02))
@@ -12,12 +13,22 @@ MISMATCH_SIM = float(os.getenv("MISMATCH_SIM", 0.5))
 DRIFT_TOL_MEAN = float(os.getenv("DRIFT_TOL_MEAN", 0.1))
 DRIFT_TOL_STD = float(os.getenv("DRIFT_TOL_STD", 0.05))
 
+
 app = FastAPI(title="RTER - Real-Time Embedding & Retrieval Scanner")
+
+class ReasonCode(str, Enum):
+    SEMANTIC_MISMATCH = "SEMANTIC_MISMATCH"
+    HIGH_REDUNDANCY = "HIGH_REDUNDANCY"
+    COLLAPSED_DISTRIBUTION = "COLLAPSED_DISTRIBUTION"
+    NOISY_DISTRIBUTION = "NOISY_DISTRIBUTION"
+    DRIFT_MEAN_SHIFT = "DRIFT_MEAN_SHIFT"
+    DRIFT_STD_SHIFT = "DRIFT_STD_SHIFT"
 
 class ScanRequest(BaseModel):
     query: str
     retrieved_texts: List[str]
     baseline: dict | None = None
+
 
 
 def analyze_distribution(similarities):
@@ -78,36 +89,57 @@ def semantic_mismatch(query_vec, doc_vectors):
         "mismatch": mismatch
     }
 
-def decision_engine(distribution, redundancy, mismatch):
+def decision_engine(distribution, redundancy, mismatch, drift=None):
     reasons = []
+    codes = []
 
     if mismatch["mismatch"]:
         reasons.append("semantic mismatch detected")
+        codes.append(ReasonCode.SEMANTIC_MISMATCH)
 
     if redundancy["level"] == "high":
         reasons.append("high redundancy in retrieved documents")
+        codes.append(ReasonCode.HIGH_REDUNDANCY)
 
     if distribution["health"] == "collapsed":
         reasons.append("similarity distribution collapsed")
+        codes.append(ReasonCode.COLLAPSED_DISTRIBUTION)
 
-    if reasons:
-        status = "error" if mismatch["mismatch"] else "warn"
+    if distribution["health"] == "noisy":
+        reasons.append("noisy similarity distribution")
+        codes.append(ReasonCode.NOISY_DISTRIBUTION)
+
+    if drift and drift.get("drift"):
+        for r in drift.get("reasons", []):
+            if "mean" in r:
+                codes.append(ReasonCode.DRIFT_MEAN_SHIFT)
+            if "variance" in r:
+                codes.append(ReasonCode.DRIFT_STD_SHIFT)
+
+    if codes:
+        status = "error" if ReasonCode.SEMANTIC_MISMATCH in codes else "warn"
     else:
         status = "ok"
 
     return {
         "status": status,
-        "reasons": reasons
+        "reasons": reasons,
+        "reason_codes": [c.value for c in codes]
     }
+
 
 def drift_check(current_dist, baseline):
     if not baseline:
-        return {"drift": False, "reason": "no baseline"}
+        return {
+            "drift": False,
+            "reason": "no baseline"
+        }
 
     mean_shift = abs(current_dist["mean"] - baseline["mean"])
     std_shift = abs(current_dist["std"] - baseline["std"])
 
     drift = (mean_shift > DRIFT_TOL_MEAN) or (std_shift > DRIFT_TOL_STD)
+
     reasons = []
     if mean_shift > DRIFT_TOL_MEAN:
         reasons.append("mean similarity shifted")
@@ -120,10 +152,6 @@ def drift_check(current_dist, baseline):
         "std_shift": std_shift,
         "reasons": reasons
     }
-
-
-
-
 
 def dummy_embed(text: str) -> np.ndarray:
     """
@@ -147,10 +175,10 @@ def scan(request: ScanRequest):
     ]
 
     dist = analyze_distribution(similarities)
-    drift = drift_check(dist, request.baseline)
     redundancy = redundancy_score(doc_vectors)
     mismatch = semantic_mismatch(query_vec, doc_vectors)
-    decision = decision_engine(dist, redundancy, mismatch)
+    drift = drift_check(dist, request.baseline)
+    decision = decision_engine(dist, redundancy, mismatch,drift)
 
 
 
