@@ -2,6 +2,15 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List
 import numpy as np
+import os
+
+# Thresholds (env-overridable)
+SIM_STD_COLLAPSE = float(os.getenv("SIM_STD_COLLAPSE", 0.02))
+MEAN_NOISY = float(os.getenv("MEAN_NOISY", 0.3))
+REDUNDANCY_HIGH = float(os.getenv("REDUNDANCY_HIGH", 0.85))
+MISMATCH_SIM = float(os.getenv("MISMATCH_SIM", 0.5))
+DRIFT_TOL_MEAN = float(os.getenv("DRIFT_TOL_MEAN", 0.1))
+DRIFT_TOL_STD = float(os.getenv("DRIFT_TOL_STD", 0.05))
 
 app = FastAPI(title="RTER - Real-Time Embedding & Retrieval Scanner")
 
@@ -22,9 +31,9 @@ def analyze_distribution(similarities):
     mean = float(np.mean(similarities))
     std = float(np.std(similarities))
 
-    if std < 0.02:
+    if std < SIM_STD_COLLAPSE:
         health = "collapsed"
-    elif mean < 0.3:
+    elif mean < MEAN_NOISY:
         health = "noisy"
     else:
         health = "healthy"
@@ -45,7 +54,8 @@ def redundancy_score(doc_vectors):
             sims.append(cosine_similarity(doc_vectors[i], doc_vectors[j]))
 
     avg_sim = float(np.mean(sims)) if sims else 0.0
-    level = "high" if avg_sim > 0.85 else "low"
+    level = "high" if avg_sim > REDUNDANCY_HIGH else "low"
+
 
     return {
         "score": avg_sim,
@@ -60,7 +70,8 @@ def semantic_mismatch(query_vec, doc_vectors):
     sim = cosine_similarity(query_vec, centroid)
 
     # Heuristic threshold (MVP)
-    mismatch = sim < 0.5
+    mismatch = sim < MISMATCH_SIM
+
 
     return {
         "score": float(sim),
@@ -89,19 +100,18 @@ def decision_engine(distribution, redundancy, mismatch):
         "reasons": reasons
     }
 
-def drift_check(current_dist, baseline, tol_mean=0.1, tol_std=0.05):
+def drift_check(current_dist, baseline):
     if not baseline:
         return {"drift": False, "reason": "no baseline"}
 
     mean_shift = abs(current_dist["mean"] - baseline["mean"])
     std_shift = abs(current_dist["std"] - baseline["std"])
 
-    drift = (mean_shift > tol_mean) or (std_shift > tol_std)
-
+    drift = (mean_shift > DRIFT_TOL_MEAN) or (std_shift > DRIFT_TOL_STD)
     reasons = []
-    if mean_shift > tol_mean:
+    if mean_shift > DRIFT_TOL_MEAN:
         reasons.append("mean similarity shifted")
-    if std_shift > tol_std:
+    if std_shift > DRIFT_TOL_STD:
         reasons.append("similarity variance shifted")
 
     return {
@@ -110,6 +120,7 @@ def drift_check(current_dist, baseline, tol_mean=0.1, tol_std=0.05):
         "std_shift": std_shift,
         "reasons": reasons
     }
+
 
 
 
