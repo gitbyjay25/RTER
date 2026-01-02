@@ -51,6 +51,22 @@ def redundancy_score(doc_vectors):
         "level": level
     }
 
+def semantic_mismatch(query_vec, doc_vectors):
+    if not doc_vectors:
+        return {"score": 0.0, "mismatch": False}
+
+    centroid = np.mean(doc_vectors, axis=0)
+    sim = cosine_similarity(query_vec, centroid)
+
+    # Heuristic threshold (MVP)
+    mismatch = sim < 0.5
+
+    return {
+        "score": float(sim),
+        "mismatch": mismatch
+    }
+
+
 
 
 def dummy_embed(text: str) -> np.ndarray:
@@ -76,6 +92,7 @@ def scan(request: ScanRequest):
 
     dist = analyze_distribution(similarities)
     redundancy = redundancy_score(doc_vectors)
+    mismatch = semantic_mismatch(query_vec, doc_vectors)
 
 
 
@@ -84,6 +101,8 @@ def scan(request: ScanRequest):
         "num_docs": len(request.retrieved_texts),
         "similarity_scores": similarities,
         "distribution": dist,
-        "redundancy": redundancy
+        "redundancy": redundancy,
+        "semantic_mismatch": mismatch
+
 
     }
