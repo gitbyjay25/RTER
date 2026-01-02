@@ -9,6 +9,32 @@ class ScanRequest(BaseModel):
     query: str
     retrieved_texts: List[str]
 
+
+def analyze_distribution(similarities):
+    if not similarities:
+        return {
+            "mean": 0.0,
+            "std": 0.0,
+            "health": "empty"
+        }
+
+    mean = float(np.mean(similarities))
+    std = float(np.std(similarities))
+
+    if std < 0.02:
+        health = "collapsed"
+    elif mean < 0.3:
+        health = "noisy"
+    else:
+        health = "healthy"
+
+    return {
+        "mean": mean,
+        "std": std,
+        "health": health
+    }
+
+
 def dummy_embed(text: str) -> np.ndarray:
     """
     Temporary embedding function.
@@ -30,9 +56,12 @@ def scan(request: ScanRequest):
         for doc_vec in doc_vectors
     ]
 
+    dist = analyze_distribution(similarities)
+
+
     return {
         "status": "ok",
         "num_docs": len(request.retrieved_texts),
         "similarity_scores": similarities,
-        "mean_similarity": float(np.mean(similarities)) if similarities else 0.0
+        "distribution": dist
     }
