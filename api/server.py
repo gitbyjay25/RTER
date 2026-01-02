@@ -8,6 +8,7 @@ app = FastAPI(title="RTER - Real-Time Embedding & Retrieval Scanner")
 class ScanRequest(BaseModel):
     query: str
     retrieved_texts: List[str]
+    baseline: dict | None = None
 
 
 def analyze_distribution(similarities):
@@ -88,6 +89,28 @@ def decision_engine(distribution, redundancy, mismatch):
         "reasons": reasons
     }
 
+def drift_check(current_dist, baseline, tol_mean=0.1, tol_std=0.05):
+    if not baseline:
+        return {"drift": False, "reason": "no baseline"}
+
+    mean_shift = abs(current_dist["mean"] - baseline["mean"])
+    std_shift = abs(current_dist["std"] - baseline["std"])
+
+    drift = (mean_shift > tol_mean) or (std_shift > tol_std)
+
+    reasons = []
+    if mean_shift > tol_mean:
+        reasons.append("mean similarity shifted")
+    if std_shift > tol_std:
+        reasons.append("similarity variance shifted")
+
+    return {
+        "drift": drift,
+        "mean_shift": mean_shift,
+        "std_shift": std_shift,
+        "reasons": reasons
+    }
+
 
 
 
@@ -113,6 +136,7 @@ def scan(request: ScanRequest):
     ]
 
     dist = analyze_distribution(similarities)
+    drift = drift_check(dist, request.baseline)
     redundancy = redundancy_score(doc_vectors)
     mismatch = semantic_mismatch(query_vec, doc_vectors)
     decision = decision_engine(dist, redundancy, mismatch)
@@ -126,7 +150,9 @@ def scan(request: ScanRequest):
         "distribution": dist,
         "redundancy": redundancy,
         "semantic_mismatch": mismatch,
-        "decision": decision
+        "decision": decision,
+        "drift": drift
+
 
 
 
