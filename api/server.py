@@ -221,8 +221,6 @@ def scan(request: ScanRequest):
     decision = decision_engine(dist, redundancy, mismatch, drift)
 
 
-    
-
 
     return {
         "status": "ok",
