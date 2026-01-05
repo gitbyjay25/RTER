@@ -312,7 +312,7 @@ def scan(request: ScanRequest):
 
     return {
         "status": "ok",
-        "num_docs": len(request.retrieved_texts),
+        "num_docs": len(doc_vectors),
         "similarity_scores": similarities,
         "distribution": dist,
         "redundancy": redundancy,
