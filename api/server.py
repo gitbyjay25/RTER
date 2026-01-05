@@ -226,6 +226,10 @@ def dummy_embed(text: str) -> np.ndarray:
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
 
 @app.get("/metrics")
 def metrics():
