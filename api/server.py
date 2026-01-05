@@ -6,6 +6,27 @@ import os
 from enum import Enum
 from collections import deque
 
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from fastapi import Response
+import time
+
+REQ_COUNTER = Counter(
+    "rter_requests_total",
+    "Total RTER scan requests",
+    ["status", "severity"]
+)
+
+DRIFT_COUNTER = Counter(
+    "rter_drift_total",
+    "Total drift detections"
+)
+
+LATENCY = Histogram(
+    "rter_scan_latency_seconds",
+    "Latency of /scan endpoint"
+)
+
+
 BASELINE_WINDOW = int(os.getenv("BASELINE_WINDOW", 50))
 baseline_buffer = deque(maxlen=BASELINE_WINDOW)
 
@@ -206,6 +227,11 @@ def dummy_embed(text: str) -> np.ndarray:
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
 
+@app.get("/metrics")
+def metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
 @app.post("/scan")
 def scan(request: ScanRequest):
     query_vec = dummy_embed(request.query)
@@ -240,7 +266,16 @@ def scan(request: ScanRequest):
         "should_page": severity == Severity.CRITICAL,
         "error_budget_impact": 1 if severity != Severity.INFO else 0
     }
+    start = time.time()
 
+    LATENCY.observe(time.time() - start)
+    REQ_COUNTER.labels(
+        status=decision["status"],
+        severity=severity.value
+    ).inc()
+
+    if drift.get("drift"):
+        DRIFT_COUNTER.inc()
 
     return {
         "status": "ok",
