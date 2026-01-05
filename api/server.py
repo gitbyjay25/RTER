@@ -5,6 +5,7 @@ import numpy as np
 import os
 from enum import Enum
 from collections import deque
+from typing import Optional
 
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from fastapi import Response
@@ -56,10 +57,18 @@ class ReasonCode(str, Enum):
     DRIFT_MEAN_SHIFT = "DRIFT_MEAN_SHIFT"
     DRIFT_STD_SHIFT = "DRIFT_STD_SHIFT"
 
+
 class ScanRequest(BaseModel):
-    query: str
-    retrieved_texts: List[str]
-    baseline: dict | None = None
+    # Text inputs (optional)
+    query: Optional[str] = None
+    retrieved_texts: Optional[List[str]] = None
+
+    # Embeddings (optional)
+    query_embedding: Optional[List[float]] = None
+    doc_embeddings: Optional[List[List[float]]] = None
+
+    baseline: Optional[dict] = None
+
 
 def severity_from_decision(decision):
     codes = set(decision.get("reason_codes", []))
@@ -226,6 +235,23 @@ def dummy_embed(text: str) -> np.ndarray:
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+def resolve_embeddings(request: ScanRequest):
+    # Case 1: User provided embeddings
+    if request.query_embedding and request.doc_embeddings:
+        return (
+            np.array(request.query_embedding),
+            [np.array(e) for e in request.doc_embeddings]
+        )
+
+    # Case 2: Fallback to text-based embedding
+    if request.query and request.retrieved_texts:
+        query_vec = dummy_embed(request.query)
+        doc_vecs = [dummy_embed(t) for t in request.retrieved_texts]
+        return query_vec, doc_vecs
+
+    raise ValueError("Either embeddings or text inputs must be provided")
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -238,8 +264,11 @@ def metrics():
 
 @app.post("/scan")
 def scan(request: ScanRequest):
-    query_vec = dummy_embed(request.query)
-    doc_vectors = [dummy_embed(doc) for doc in request.retrieved_texts]
+    try:
+        query_vec, doc_vectors = resolve_embeddings(request)
+    except ValueError as e:
+        return {"error": str(e)}
+
 
     similarities = [
         cosine_similarity(query_vec, doc_vec)
