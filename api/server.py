@@ -21,6 +21,12 @@ DRIFT_TOL_STD = float(os.getenv("DRIFT_TOL_STD", 0.05))
 
 app = FastAPI(title="RTER - Real-Time Embedding & Retrieval Scanner")
 
+class Severity(str, Enum):
+    INFO = "INFO"
+    WARN = "WARN"
+    CRITICAL = "CRITICAL"
+
+
 class ReasonCode(str, Enum):
     SEMANTIC_MISMATCH = "SEMANTIC_MISMATCH"
     HIGH_REDUNDANCY = "HIGH_REDUNDANCY"
@@ -34,6 +40,13 @@ class ScanRequest(BaseModel):
     retrieved_texts: List[str]
     baseline: dict | None = None
 
+def severity_from_decision(decision):
+    codes = set(decision.get("reason_codes", []))
+    if "SEMANTIC_MISMATCH" in codes:
+        return Severity.CRITICAL
+    if any(c in codes for c in ["HIGH_REDUNDANCY", "COLLAPSED_DISTRIBUTION", "DRIFT_MEAN_SHIFT", "DRIFT_STD_SHIFT"]):
+        return Severity.WARN
+    return Severity.INFO
 
 
 def analyze_distribution(similarities):
@@ -220,6 +233,13 @@ def scan(request: ScanRequest):
     # update decision WITH drift
     decision = decision_engine(dist, redundancy, mismatch, drift)
 
+    severity = severity_from_decision(decision)
+
+    slo = {
+        "should_alert": severity in [Severity.WARN, Severity.CRITICAL],
+        "should_page": severity == Severity.CRITICAL,
+        "error_budget_impact": 1 if severity != Severity.INFO else 0
+    }
 
 
     return {
@@ -230,7 +250,10 @@ def scan(request: ScanRequest):
         "redundancy": redundancy,
         "semantic_mismatch": mismatch,
         "decision": decision,
-        "drift": drift
+        "drift": drift,
+        "severity": severity,
+        "slo": slo
+
 
 
 
