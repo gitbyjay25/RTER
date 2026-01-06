@@ -10,6 +10,8 @@ from typing import Optional
 
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from fastapi import Response,HTTPException
+from sentence_transformers import SentenceTransformer
+
 
 import time
 
@@ -330,6 +332,7 @@ def update_and_get_baseline(dist, decision):
             "mean": dist["mean"],
             "std": dist["std"]
         })
+        save_baseline_to_disk()   
 
     if not baseline_buffer:
         return None
@@ -342,6 +345,29 @@ def update_and_get_baseline(dist, decision):
         "std": float(np.mean(std_vals))
     }
 
+import json
+# ---- Baseline persistence ----
+BASELINE_PATH = os.getenv("BASELINE_PATH", "data/baseline.json")
+os.makedirs(os.path.dirname(BASELINE_PATH), exist_ok=True)
+
+
+def load_baseline_from_disk():
+    if not os.path.exists(BASELINE_PATH):
+        return
+    try:
+        with open(BASELINE_PATH, "r") as f:
+            items = json.load(f)
+            for b in items[-BASELINE_WINDOW:]:
+                baseline_buffer.append(b)
+    except Exception as e:
+        print("Failed to load baseline:", e)
+
+def save_baseline_to_disk():
+    try:
+        with open(BASELINE_PATH, "w") as f:
+            json.dump(list(baseline_buffer), f)
+    except Exception as e:
+        print("Failed to save baseline:", e)
 
 
 def dummy_embed(text: str) -> np.ndarray:
@@ -555,3 +581,7 @@ def scan_batch(batch: BatchScanRequest):
 @app.post("/scan/pair")
 def scan_pair(req: PairScanRequest):
     return run_pair_scan(req.original, req.rewritten)
+
+@app.on_event("startup")
+def _load_baseline():
+    load_baseline_from_disk()
