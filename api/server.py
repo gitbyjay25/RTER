@@ -70,6 +70,7 @@ class ScanRequest(BaseModel):
     doc_embeddings: Optional[List[List[float]]] = None
 
     baseline: Optional[dict] = None
+    mode: Literal["retrieval", "rewrite"] = "retrieval"
 
 class BatchScanRequest(BaseModel):
     items: List[ScanRequest]
@@ -392,17 +393,27 @@ def run_single_scan(request: ScanRequest):
     # decision
     decision = decision_engine(dist, redundancy, mismatch, drift)
 
-    # meaning drift (best doc)
-    best_doc = doc_vectors[int(np.argmax(sims))]
-    meaning_drift = meaning_drift_score(query_vec, best_doc)
+    
+    # meaning drift: strict only for rewrite mode
+    if request.mode == "rewrite" and len(doc_vectors) == 1:
+        meaning_drift = meaning_drift_score(query_vec, doc_vectors[0])
 
-    # decision update from meaning drift
-    if meaning_drift["level"] == "high":
-        decision["status"] = "error"
-        decision["reason_codes"].append("MEANING_DRIFT_HIGH")
-    elif meaning_drift["level"] == "medium":
-        decision["status"] = "warn"
-        decision["reason_codes"].append("MEANING_DRIFT_MEDIUM")
+        # decision update from meaning drift (rewrite only)
+        if meaning_drift["level"] == "high":
+            decision["status"] = "error"
+            decision["reason_codes"].append("MEANING_DRIFT_HIGH")
+        elif meaning_drift["level"] == "medium":
+            decision["status"] = "warn"
+            decision["reason_codes"].append("MEANING_DRIFT_MEDIUM")
+
+    else:
+        meaning_drift = {
+            "similarity": None,
+            "score": 0.0,
+            "level": "low"
+        }
+
+
 
     severity = severity_from_decision(decision)
     suggested_actions = suggested_actions_from_reasons(decision["reason_codes"])
