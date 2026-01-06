@@ -1,8 +1,9 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List
+from typing import Literal
 import numpy as np
-import os
+import os,re
 from enum import Enum
 from collections import deque
 from typing import Optional
@@ -79,7 +80,14 @@ class BatchScanResponse(BaseModel):
     results: List[dict]
     summary: dict
 
+def keyword_overlap_ratio(a: str, b: str) -> float:
+    tokenize = lambda s: set(re.findall(r"[a-z]+", s.lower()))
+    ta, tb = tokenize(a), tokenize(b)
 
+    if not ta:
+        return 0.0
+
+    return len(ta & tb) / len(ta)
 def severity_from_decision(decision):
     codes = set(decision.get("reason_codes", []))
     if "SEMANTIC_MISMATCH" in codes:
@@ -175,21 +183,26 @@ def redundancy_score(doc_vectors):
         "level": level
     }
 
-def semantic_mismatch(query_vec, doc_vecs):
+def semantic_mismatch(query: str, doc_texts: list[str], query_vec, doc_vecs):
     sims = [cosine_similarity(query_vec, dv) for dv in doc_vecs]
-
     max_sim = max(sims)
     mean_sim = sum(sims) / len(sims)
 
+    overlaps = [keyword_overlap_ratio(query, t) for t in doc_texts]
+    max_overlap = max(overlaps) if overlaps else 0.0
+
     mismatch = (
-        max_sim < 0.70 or        # absolute intent miss
-        mean_sim < 0.72          # overall weak alignment
+        max_sim < 0.70 or        # weak semantic similarity
+        mean_sim < 0.72 or
+        max_overlap < 0.15       # 🔥 topic anchor guard
     )
 
     return {
         "score": round(max_sim, 3),
-        "mismatch": mismatch
+        "mismatch": mismatch,
+        "lexical_overlap": round(max_overlap, 3)
     }
+
 
 def decision_engine(distribution, redundancy, mismatch, drift=None):
     reasons = []
@@ -385,7 +398,12 @@ def run_single_scan(request: ScanRequest):
 
     dist = analyze_distribution(sims)
     redundancy = redundancy_score(doc_vectors)
-    mismatch = semantic_mismatch(query_vec, doc_vectors)
+    mismatch = semantic_mismatch(
+    request.query,
+    request.retrieved_texts or [],
+    query_vec,
+    doc_vectors
+)
 
     # drift (if you already have it wired)
     drift = drift_check(dist, request.baseline)
