@@ -367,15 +367,20 @@ def confidence_score(dist, redundancy, mismatch, meaning_drift, drift):
     risk = 0.0
 
     # Distribution collapse
-    if dist.get("health") == "collapsed":
-        risk += 0.25
+    if dist.get("health") == "collapsed" and dist.get("std", 0) < 0.015:
+        risk += 0.15
+
 
     # Redundancy (0–1)
-    risk += min(0.25, float(redundancy.get("score", 0)))
+    risk += min(0.15, float(redundancy.get("score", 0)))
 
     # Semantic mismatch
     if mismatch.get("mismatch"):
-        risk += 0.25
+        risk += 0.45
+    # Reward strong alignment (retrieval mode)
+    if not mismatch.get("mismatch") and dist.get("mean", 0) > 0.74:
+        risk -= 0.15
+
 
     # Meaning drift (0–1)
     risk += min(0.25, float(meaning_drift.get("score", 0)))
@@ -385,8 +390,9 @@ def confidence_score(dist, redundancy, mismatch, meaning_drift, drift):
         risk += 0.2
 
     # Clamp & invert
-    risk = min(1.0, risk)
-    return round(1.0 - risk, 3)
+    risk = max(0.0, min(1.0, risk))
+    confidence = round(1.0 - risk, 3)
+    return max(0.1, confidence)
 
 def run_single_scan(request: ScanRequest):
     # resolve + validate
