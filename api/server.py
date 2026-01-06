@@ -282,6 +282,22 @@ def validate_embeddings(query_vec: np.ndarray, doc_vecs: list[np.ndarray]):
             status_code=400,
             detail="Non-finite values in query_embedding"
         )
+def meaning_drift_score(a: np.ndarray, b: np.ndarray):
+    sim = cosine_similarity(a, b)
+    drift = float(max(0.0, min(1.0, 1.0 - sim)))
+
+    if drift <= 0.2:
+        level = "low"
+    elif drift <= 0.4:
+        level = "medium"
+    else:
+        level = "high"
+
+    return {
+        "similarity": float(sim),
+        "score": drift,
+        "level": level
+    }
 
 
 @app.get("/health")
@@ -310,6 +326,14 @@ def scan(request: ScanRequest):
         for doc_vec in doc_vectors
     ]
 
+    # Compare query with the best-matching doc
+    best_doc = doc_vectors[int(np.argmax([
+        cosine_similarity(query_vec, dv) for dv in doc_vectors
+    ]))]
+
+    meaning_drift = meaning_drift_score(query_vec, best_doc)
+
+
     dist = analyze_distribution(similarities)
     redundancy = redundancy_score(doc_vectors)
     mismatch = semantic_mismatch(query_vec, doc_vectors)
@@ -326,8 +350,17 @@ def scan(request: ScanRequest):
 
     # update decision WITH drift
     decision = decision_engine(dist, redundancy, mismatch, drift)
+    if meaning_drift["level"] == "high":
+        decision["status"] = "error"
+        decision["reason_codes"].append("MEANING_DRIFT_HIGH")
+
+    elif meaning_drift["level"] == "medium":
+        decision["status"] = "warn"
+        decision["reason_codes"].append("MEANING_DRIFT_MEDIUM")
+
 
     severity = severity_from_decision(decision)
+
 
     slo = {
         "should_alert": severity in [Severity.WARN, Severity.CRITICAL],
