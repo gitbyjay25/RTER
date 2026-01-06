@@ -80,6 +80,48 @@ class BatchScanResponse(BaseModel):
     results: List[dict]
     summary: dict
 
+class PairScanRequest(BaseModel):
+    original: str
+    rewritten: str
+
+def run_pair_scan(original: str, rewritten: str):
+    q = dummy_embed(original)
+    r = dummy_embed(rewritten)
+
+    meaning_drift = meaning_drift_score(q, r)
+
+    decision = {
+        "status": "ok",
+        "reasons": [],
+        "reason_codes": []
+    }
+
+    if meaning_drift["level"] == "high":
+        decision["status"] = "error"
+        decision["reason_codes"].append("MEANING_DRIFT_HIGH")
+        decision["reasons"].append("meaning changed significantly")
+
+    elif meaning_drift["level"] == "medium":
+        decision["status"] = "warn"
+        decision["reason_codes"].append("MEANING_DRIFT_MEDIUM")
+        decision["reasons"].append("meaning partially changed")
+
+    severity = severity_from_decision(decision)
+    suggested_actions = suggested_actions_from_reasons(decision["reason_codes"])
+
+    # confidence = inverse of drift (simple & intuitive)
+    confidence = round(1.0 - meaning_drift["score"], 3)
+
+    return {
+        "meaning_drift": meaning_drift,
+        "decision": decision,
+        "severity": severity,
+        "confidence": confidence,
+        "suggested_actions": suggested_actions
+    }
+
+
+
 def keyword_overlap_ratio(a: str, b: str) -> float:
     tokenize = lambda s: set(re.findall(r"[a-z]+", s.lower()))
     ta, tb = tokenize(a), tokenize(b)
@@ -500,3 +542,6 @@ def scan_batch(batch: BatchScanRequest):
         }
     }
 
+@app.post("/scan/pair")
+def scan_pair(req: PairScanRequest):
+    return run_pair_scan(req.original, req.rewritten)
