@@ -132,11 +132,21 @@ def keyword_overlap_ratio(a: str, b: str) -> float:
     return len(ta & tb) / len(ta)
 def severity_from_decision(decision):
     codes = set(decision.get("reason_codes", []))
-    if "SEMANTIC_MISMATCH" in codes:
+
+    if "SEMANTIC_MISMATCH" in codes or "MEANING_DRIFT_HIGH" in codes:
         return Severity.CRITICAL
-    if any(c in codes for c in ["HIGH_REDUNDANCY", "COLLAPSED_DISTRIBUTION", "DRIFT_MEAN_SHIFT", "DRIFT_STD_SHIFT"]):
+
+    if any(c in codes for c in [
+        "MEANING_DRIFT_MEDIUM",
+        "HIGH_REDUNDANCY",
+        "COLLAPSED_DISTRIBUTION",
+        "DRIFT_MEAN_SHIFT",
+        "DRIFT_STD_SHIFT"
+    ]):
         return Severity.WARN
+
     return Severity.INFO
+
 
 def suggested_actions_from_reasons(reason_codes: list[str]):
     print("DEBUG reason_codes:", reason_codes)
