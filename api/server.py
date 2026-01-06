@@ -174,19 +174,19 @@ def redundancy_score(doc_vectors):
         "level": level
     }
 
-def semantic_mismatch(query_vec, doc_vectors):
-    if not doc_vectors:
-        return {"score": 0.0, "mismatch": False}
+def semantic_mismatch(query_vec, doc_vecs):
+    sims = [cosine_similarity(query_vec, dv) for dv in doc_vecs]
 
-    centroid = np.mean(doc_vectors, axis=0)
-    sim = cosine_similarity(query_vec, centroid)
+    max_sim = max(sims)
+    mean_sim = sum(sims) / len(sims)
 
-    # Heuristic threshold (MVP)
-    mismatch = sim < MISMATCH_SIM
-
+    mismatch = (
+        max_sim < 0.70 or        # absolute intent miss
+        mean_sim < 0.72          # overall weak alignment
+    )
 
     return {
-        "score": float(sim),
+        "score": round(max_sim, 3),
         "mismatch": mismatch
     }
 
