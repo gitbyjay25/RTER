@@ -71,6 +71,13 @@ class ScanRequest(BaseModel):
 
     baseline: Optional[dict] = None
 
+class BatchScanRequest(BaseModel):
+    items: List[ScanRequest]
+
+class BatchScanResponse(BaseModel):
+    results: List[dict]
+    summary: dict
+
 
 def severity_from_decision(decision):
     codes = set(decision.get("reason_codes", []))
@@ -342,6 +349,51 @@ def meaning_drift_score(a: np.ndarray, b: np.ndarray):
         "score": drift,
         "level": level
     }
+def run_single_scan(request: ScanRequest):
+    # resolve + validate
+    query_vec, doc_vectors = resolve_embeddings(request)
+    validate_embeddings(query_vec, doc_vectors)
+
+    # compute similarities
+    sims = [cosine_similarity(query_vec, dv) for dv in doc_vectors]
+
+    dist = analyze_distribution(sims)
+    redundancy = redundancy_score(doc_vectors)
+    mismatch = semantic_mismatch(query_vec, doc_vectors)
+
+    # drift (if you already have it wired)
+    drift = drift_check(dist, request.baseline)
+
+    # decision
+    decision = decision_engine(dist, redundancy, mismatch, drift)
+
+    # meaning drift (best doc)
+    best_doc = doc_vectors[int(np.argmax(sims))]
+    meaning_drift = meaning_drift_score(query_vec, best_doc)
+
+    # decision update from meaning drift
+    if meaning_drift["level"] == "high":
+        decision["status"] = "error"
+        decision["reason_codes"].append("MEANING_DRIFT_HIGH")
+    elif meaning_drift["level"] == "medium":
+        decision["status"] = "warn"
+        decision["reason_codes"].append("MEANING_DRIFT_MEDIUM")
+
+    severity = severity_from_decision(decision)
+    suggested_actions = suggested_actions_from_reasons(decision["reason_codes"])
+
+    return {
+        "num_docs": len(doc_vectors),
+        "similarity_scores": sims,
+        "distribution": dist,
+        "redundancy": redundancy,
+        "semantic_mismatch": mismatch,
+        "meaning_drift": meaning_drift,
+        "decision": decision,
+        "severity": severity,
+        "suggested_actions": suggested_actions,
+        "drift": drift
+    }
 
 
 @app.get("/health")
@@ -356,97 +408,27 @@ def metrics():
 
 @app.post("/scan")
 def scan(request: ScanRequest):
-    try:
-        query_vec, doc_vectors = resolve_embeddings(request)
-        validate_embeddings(query_vec, doc_vectors)
-    except HTTPException as e :
-        raise e
-    except ValueError as e:
-        return {"error": str(e)}
+    return run_single_scan(request)
 
+@app.post("/scan/batch")
+def scan_batch(batch: BatchScanRequest):
+    results = []
+    counts = {"ok": 0, "warn": 0, "error": 0}
 
-    similarities = [
-        cosine_similarity(query_vec, doc_vec)
-        for doc_vec in doc_vectors
-    ]
-
-    # Compare query with the best-matching doc
-    best_doc = doc_vectors[int(np.argmax([
-        cosine_similarity(query_vec, dv) for dv in doc_vectors
-    ]))]
-
-    meaning_drift = meaning_drift_score(query_vec, best_doc)
-
-
-    dist = analyze_distribution(similarities)
-    redundancy = redundancy_score(doc_vectors)
-    mismatch = semantic_mismatch(query_vec, doc_vectors)
-
-    # decide FIRST
-    decision = decision_engine(dist, redundancy, mismatch, drift=None)
-
-    # baseline from client OR auto-learned
-    auto_baseline = update_and_get_baseline(dist, decision)
-    baseline = request.baseline or auto_baseline
-
-    # now check drift
-    drift = drift_check(dist, baseline)
-
-    # update decision WITH drift
-    decision = decision_engine(dist, redundancy, mismatch, drift)
-
-    suggested_actions = suggested_actions_from_reasons(
-        decision.get("reason_codes", [])
-    )
-
-# later...
-    if meaning_drift["level"] == "high":
-        decision["reason_codes"].append("MEANING_DRIFT_HIGH")
-        if meaning_drift["level"] == "high":
-            decision["status"] = "error"
-            decision["reason_codes"].append("MEANING_DRIFT_HIGH")
-
-        elif meaning_drift["level"] == "medium":
-            decision["status"] = "warn"
-            decision["reason_codes"].append("MEANING_DRIFT_MEDIUM")
-
-
-    severity = severity_from_decision(decision)
-
-
-
-    slo = {
-        "should_alert": severity in [Severity.WARN, Severity.CRITICAL],
-        "should_page": severity == Severity.CRITICAL,
-        "error_budget_impact": 1 if severity != Severity.INFO else 0
-    }
-    start = time.time()
-
-    LATENCY.observe(time.time() - start)
-    REQ_COUNTER.labels(
-        status=decision["status"],
-        severity=severity.value
-    ).inc()
-
-    if drift.get("drift"):
-        DRIFT_COUNTER.inc()
+    for item in batch.items:
+        try:
+            res = run_single_scan(item)
+            results.append(res)
+            counts[res["decision"]["status"]] += 1
+        except Exception as e:
+            results.append({"error": str(e)})
+            counts["error"] += 1
 
     return {
-        "status": "ok",
-        "num_docs": len(doc_vectors),
-        "similarity_scores": similarities,
-        "distribution": dist,
-        "redundancy": redundancy,
-        "semantic_mismatch": mismatch,
-        "decision": decision,
-        "drift": drift,
-        "severity": severity,
-        "slo": slo,
-        "suggested_actions":suggested_actions
-
-
-
-
-
-
+        "results": results,
+        "summary": {
+            "total": len(results),
+            **counts
+        }
     }
+
