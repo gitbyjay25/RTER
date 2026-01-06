@@ -8,8 +8,10 @@ from collections import deque
 from typing import Optional
 
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
-from fastapi import Response
+from fastapi import Response,HTTPException
+
 import time
+
 
 REQ_COUNTER = Counter(
     "rter_requests_total",
@@ -243,6 +245,7 @@ def resolve_embeddings(request: ScanRequest):
             np.array(request.query_embedding),
             [np.array(e) for e in request.doc_embeddings]
         )
+    
 
     # Case 2: Fallback to text-based embedding
     if request.query and request.retrieved_texts:
@@ -251,6 +254,35 @@ def resolve_embeddings(request: ScanRequest):
         return query_vec, doc_vecs
 
     raise ValueError("Either embeddings or text inputs must be provided")
+
+
+
+def validate_embeddings(query_vec: np.ndarray, doc_vecs: list[np.ndarray]):
+    if query_vec.size == 0:
+        raise HTTPException(status_code=400, detail="query_embedding is empty")
+
+    dims = query_vec.shape[0]
+
+    for i, v in enumerate(doc_vecs):
+        if v.size == 0:
+            raise HTTPException(status_code=400, detail=f"doc_embeddings[{i}] is empty")
+        if v.shape[0] != dims:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Embedding dimension mismatch: query={dims}, doc[{i}]={v.shape[0]}"
+            )
+        if not np.isfinite(v).all():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Non-finite values in doc_embeddings[{i}]"
+            )
+
+    if not np.isfinite(query_vec).all():
+        raise HTTPException(
+            status_code=400,
+            detail="Non-finite values in query_embedding"
+        )
+
 
 @app.get("/health")
 def health():
@@ -266,6 +298,9 @@ def metrics():
 def scan(request: ScanRequest):
     try:
         query_vec, doc_vectors = resolve_embeddings(request)
+        validate_embeddings(query_vec, doc_vectors)
+    except HTTPException as e :
+        raise e
     except ValueError as e:
         return {"error": str(e)}
 
