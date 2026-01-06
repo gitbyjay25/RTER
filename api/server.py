@@ -349,6 +349,31 @@ def meaning_drift_score(a: np.ndarray, b: np.ndarray):
         "score": drift,
         "level": level
     }
+def confidence_score(dist, redundancy, mismatch, meaning_drift, drift):
+    risk = 0.0
+
+    # Distribution collapse
+    if dist.get("health") == "collapsed":
+        risk += 0.25
+
+    # Redundancy (0–1)
+    risk += min(0.25, float(redundancy.get("score", 0)))
+
+    # Semantic mismatch
+    if mismatch.get("mismatch"):
+        risk += 0.25
+
+    # Meaning drift (0–1)
+    risk += min(0.25, float(meaning_drift.get("score", 0)))
+
+    # System drift
+    if drift.get("drift"):
+        risk += 0.2
+
+    # Clamp & invert
+    risk = min(1.0, risk)
+    return round(1.0 - risk, 3)
+
 def run_single_scan(request: ScanRequest):
     # resolve + validate
     query_vec, doc_vectors = resolve_embeddings(request)
@@ -381,7 +406,13 @@ def run_single_scan(request: ScanRequest):
 
     severity = severity_from_decision(decision)
     suggested_actions = suggested_actions_from_reasons(decision["reason_codes"])
-
+    confidence = confidence_score(
+    dist=dist,
+    redundancy=redundancy,
+    mismatch=mismatch,
+    meaning_drift=meaning_drift,
+    drift=drift
+)
     return {
         "num_docs": len(doc_vectors),
         "similarity_scores": sims,
@@ -392,7 +423,9 @@ def run_single_scan(request: ScanRequest):
         "decision": decision,
         "severity": severity,
         "suggested_actions": suggested_actions,
-        "drift": drift
+        "drift": drift,
+        "confidence": confidence,
+
     }
 
 
