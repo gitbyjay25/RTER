@@ -80,6 +80,50 @@ def severity_from_decision(decision):
         return Severity.WARN
     return Severity.INFO
 
+def suggested_actions_from_reasons(reason_codes: list[str]):
+    print("DEBUG reason_codes:", reason_codes)
+    actions = set()
+
+    for code in reason_codes:
+        code = code.strip().upper()  # 👈 NORMALIZE
+
+        if code == "COLLAPSED_DISTRIBUTION":
+            actions.update([
+                "increase_top_k",
+                "use_hybrid_retrieval",
+                "add_keyword_filter"
+            ])
+
+        elif code == "HIGH_REDUNDANCY":
+            actions.update([
+                "deduplicate_documents",
+                "increase_retrieval_diversity"
+            ])
+
+        elif code == "SEMANTIC_MISMATCH":
+            actions.update([
+                "fallback_to_keyword_search",
+                "block_generation",
+                "request_more_context"
+            ])
+
+        elif code == "MEANING_DRIFT_HIGH":
+            actions.update([
+                "regenerate_output",
+                "lower_temperature",
+                "compare_with_original_text"
+            ])
+
+        elif code == "MEANING_DRIFT_MEDIUM":
+            actions.update([
+                "log_warning",
+                "manual_review"
+            ])
+
+    return list(actions)
+
+
+
 
 def analyze_distribution(similarities):
     if not similarities:
@@ -350,16 +394,25 @@ def scan(request: ScanRequest):
 
     # update decision WITH drift
     decision = decision_engine(dist, redundancy, mismatch, drift)
-    if meaning_drift["level"] == "high":
-        decision["status"] = "error"
-        decision["reason_codes"].append("MEANING_DRIFT_HIGH")
 
-    elif meaning_drift["level"] == "medium":
-        decision["status"] = "warn"
-        decision["reason_codes"].append("MEANING_DRIFT_MEDIUM")
+    suggested_actions = suggested_actions_from_reasons(
+        decision.get("reason_codes", [])
+    )
+
+# later...
+    if meaning_drift["level"] == "high":
+        decision["reason_codes"].append("MEANING_DRIFT_HIGH")
+        if meaning_drift["level"] == "high":
+            decision["status"] = "error"
+            decision["reason_codes"].append("MEANING_DRIFT_HIGH")
+
+        elif meaning_drift["level"] == "medium":
+            decision["status"] = "warn"
+            decision["reason_codes"].append("MEANING_DRIFT_MEDIUM")
 
 
     severity = severity_from_decision(decision)
+
 
 
     slo = {
@@ -388,7 +441,9 @@ def scan(request: ScanRequest):
         "decision": decision,
         "drift": drift,
         "severity": severity,
-        "slo": slo
+        "slo": slo,
+        "suggested_actions":suggested_actions
+
 
 
 
