@@ -155,3 +155,8 @@ It answers:
 “Should my system trust this retrieval or rewrite right now?”
 
 Before users ever see the output.
+
+## License
+
+This project is licensed under the Apache License 2.0.  
+See the [LICENSE](License) file for details.
