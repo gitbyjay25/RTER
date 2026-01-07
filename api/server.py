@@ -506,7 +506,10 @@ def run_single_scan(request: ScanRequest):
     validate_embeddings(query_vec, doc_vectors)
 
     # compute similarities
-    sims = [cosine_similarity(query_vec, dv) for dv in doc_vectors]
+    sims = [
+    stable_similarity(cosine_similarity(query_vec, dv))
+    for dv in doc_vectors
+]
 
     dist = analyze_distribution(sims)
     redundancy = redundancy_score(doc_vectors)
@@ -570,6 +573,13 @@ def run_single_scan(request: ScanRequest):
 
 
     }
+
+def stable_similarity(sim: float, epsilon: float = 0.03):
+    """
+    Clamp similarity into a stable band to avoid jitter-based decisions.
+    """
+    return round(sim / epsilon) * epsilon
+
 
 
 @app.get("/health")
