@@ -14,6 +14,14 @@ from sentence_transformers import SentenceTransformer
 
 
 import time
+EMBEDDING_BACKEND = os.getenv("EMBEDDING_BACKEND", "sbert")
+_embedding_model = None
+
+def get_embedding_model():
+    global _embedding_model
+    if _embedding_model is None:
+        _embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+    return _embedding_model
 
 
 REQ_COUNTER = Counter(
@@ -370,13 +378,11 @@ def save_baseline_to_disk():
         print("Failed to save baseline:", e)
 
 
-def dummy_embed(text: str) -> np.ndarray:
-    """
-    Temporary embedding function.
-    Will be replaced by real embedding model.
-    """
-    np.random.seed(abs(hash(text)) % (10**6))
-    return np.random.rand(128)
+def embed(text: str) -> np.ndarray:
+    model = get_embedding_model()
+    vec = model.encode(text, normalize_embeddings=True)
+    return np.array(vec)
+
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
@@ -392,8 +398,9 @@ def resolve_embeddings(request: ScanRequest):
 
     # Case 2: Fallback to text-based embedding
     if request.query and request.retrieved_texts:
-        query_vec = dummy_embed(request.query)
-        doc_vecs = [dummy_embed(t) for t in request.retrieved_texts]
+        query_vec = embed(request.query)
+        doc_vecs = [embed(t) for t in request.retrieved_texts]
+
         return query_vec, doc_vecs
 
     raise ValueError("Either embeddings or text inputs must be provided")
