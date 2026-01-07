@@ -2,3 +2,5 @@ fastapi
 uvicorn
 numpy
 prometheus-client
+sentence-transformers
+tf-keras
