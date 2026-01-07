@@ -1,157 +1,164 @@
+ # 📗 `docs/USAGE.md`  
+ # RTER — Usage & Integration Guide
 
----
+RTER is a backend trust & safety service for embedding-based systems
+(RAG, semantic search, rewrite/humanizer pipelines).
 
-# 📗 `docs/USAGE.md`  
-👉 **Complete HOW-TO guide**
+It runs silently in the background and returns risk signals
+(confidence, severity, reasons) that your system can act on.
 
-```md
-# RTER – Usage & Installation Guide
+--------------------------------------------------
+1. Installation
+--------------------------------------------------
 
-This document explains how to **install, run, and integrate RTER** into any application.
+Clone the repository:
+git clone https://github.com/<your-org>/RTER.git
+cd RTER
 
----
+Create virtual environment (recommended):
+python -m venv venv
+source venv/bin/activate        # Linux / macOS
+venv\\Scripts\\activate         # Windows
 
-## 📦 Installation Options
-
-### Option 1: Local (Python)
-
-```bash
+Install dependencies:
 pip install -r requirements.txt
-uvicorn api.server:app --reload
 
+--------------------------------------------------
+2. Running the Service
+--------------------------------------------------
 
----
+Start the server:
+uvicorn api.server:app --host 0.0.0.0 --port 8000
 
-# 📗 `docs/USAGE.md`  
-👉 **Complete HOW-TO guide**
+Health check:
+curl http://localhost:8000/health
 
-```md
-# RTER – Usage & Installation Guide
+Expected response:
+{"status":"ok"}
 
-This document explains how to **install, run, and integrate RTER** into any application.
+--------------------------------------------------
+3. Core Concept
+--------------------------------------------------
 
----
+RTER does NOT block your application.
 
-🚀 Installation & Running
-Option 1: Run Locally (Python)
-bash
-Copy code
-pip install -r requirements.txt
-uvicorn api.server:app --reload
-Access:
+It only returns:
+- decision (ok / warn / error)
+- severity
+- confidence + confidence_band
+- reasons
+- suggested_actions
 
-Swagger UI: http://127.0.0.1:8000/docs
+Your application decides what to do.
 
-Health: http://127.0.0.1:8000/health
+--------------------------------------------------
+4. Retrieval Validation (RAG / Search)
+--------------------------------------------------
 
-Metrics: http://127.0.0.1:8000/metrics
+Use this AFTER vector DB retrieval
+and BEFORE LLM generation.
 
-Option 2: Docker (Recommended)
-bash
-Copy code
-docker build -t rter .
-docker run -p 8000:8000 rter
-🔌 API Usage
-Endpoint
-http
-Copy code
-POST /scan
-Request Example
-json
-Copy code
+Example request:
+curl -X POST http://localhost:8000/scan \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "query": "what do cows eat",
+    "retrieved_texts": [
+      "Cows are herbivores and primarily graze on grass.",
+      "A dairy cow diet includes hay and silage."
+    ]
+  }'
+
+Example response:
 {
-  "query": "refund policy",
-  "retrieved_texts": [
-    "Refunds are issued within 7 days for subscriptions.",
-    "Our refund policy applies to annual plans."
-  ],
-  "baseline": {
-    "mean": 0.72,
-    "std": 0.08
-  }
+  "decision": {"status":"ok"},
+  "severity":"INFO",
+  "confidence":0.81,
+  "confidence_band":"high"
 }
-Notes
-baseline is optional
 
-If not provided, RTER automatically learns a rolling baseline
+--------------------------------------------------
+5. Unsafe Retrieval Example
+--------------------------------------------------
 
-RTER does not generate embeddings for you — it evaluates behavior
+curl -X POST http://localhost:8000/scan \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "query": "what do cows eat",
+    "retrieved_texts": [
+      "Python is a programming language.",
+      "Tigers are carnivorous animals."
+    ]
+  }'
 
-📤 Response Example
-json
-Copy code
-{
-  "decision": {
-    "status": "error",
-    "reason_codes": ["SEMANTIC_MISMATCH"]
-  },
-  "severity": "CRITICAL",
-  "slo": {
-    "should_alert": true,
-    "should_page": true,
-    "error_budget_impact": 1
-  }
-}
-🧭 How Your Application Should React
-Decision	Meaning	Recommended Action
-ok	Retrieval healthy	Proceed normally
-warn	Risk detected	Log, rerank, or fallback
-error	Retrieval broken	Block generation / alert
-
-🧠 Example Integration (Pseudo-code)
-python
-Copy code
-scan = call_rter(query, retrieved_docs)
-
-status = scan["decision"]["status"]
-
-if status == "error":
-    fallback_to_keyword_search()
-elif status == "warn":
-    log_warning(scan)
-else:
-    generate_llm_answer()
-⚙️ Configuration (Environment Variables)
-bash
-Copy code
-REDUNDANCY_HIGH=0.9
-MISMATCH_SIM=0.6
-DRIFT_TOL_MEAN=0.08
-DRIFT_TOL_STD=0.05
-BASELINE_WINDOW=50
-These allow dataset-specific tuning without code changes.
-
-📊 Metrics & Observability
-Metrics are exposed at:
-
-bash
-Copy code
-/metrics
-Key metrics:
-
-rter_requests_total
-
-rter_drift_total
-
-rter_scan_latency_seconds
-
-These can be scraped by Prometheus and visualized in Grafana.
-
-🩺 Healthcheck
-http
-Copy code
-GET /health
 Response:
+{
+  "decision":{"status":"error"},
+  "severity":"CRITICAL",
+  "confidence":0.18,
+  "confidence_band":"unsafe",
+  "suggested_actions":["fallback_to_keyword_search"]
+}
 
-json
-Copy code
-{ "status": "ok" }
-Used by:
+--------------------------------------------------
+6. Rewrite / Humanizer Validation
+--------------------------------------------------
 
-Load balancers
+Use AFTER generation but BEFORE final delivery.
 
-Kubernetes
+curl -X POST http://localhost:8000/scan \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "original": "The company allows refunds within seven days.",
+    "rewritten": "Customers can request their money back within a week."
+  }'
 
-Cloud platforms
+Response:
+{
+  "decision":{"status":"warn"},
+  "severity":"WARN",
+  "confidence":0.74,
+  "confidence_band":"medium"
+}
 
+--------------------------------------------------
+7. Using Precomputed Embeddings
+--------------------------------------------------
 
+curl -X POST http://localhost:8000/scan \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "query_embedding":[0.12,0.44,0.98],
+    "doc_embeddings":[
+      [0.11,0.42,0.97],
+      [0.02,0.91,0.13]
+    ]
+  }'
+
+--------------------------------------------------
+8. Confidence Bands
+--------------------------------------------------
+
+high     -> Proceed
+medium   -> Proceed + log
+low      -> Warn / fallback
+unsafe   -> Block or fallback
+
+--------------------------------------------------
+9. Metrics
+--------------------------------------------------
+
+Prometheus-compatible metrics:
+curl http://localhost:8000/metrics
+
+--------------------------------------------------
+10. Design Guarantees
+--------------------------------------------------
+
+- Deterministic behavior
+- Conservative by default
+- No auto-learning
+- No silent threshold changes
+- Explainable decisions
+
+--------------------------------------------------
