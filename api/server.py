@@ -245,25 +245,34 @@ def redundancy_score(doc_vectors):
         "level": level
     }
 
-def semantic_mismatch(query: str, doc_texts: list[str], query_vec, doc_vecs):
+def semantic_mismatch(query_vec, doc_vecs, query_text=None, docs_text=None):
     sims = [cosine_similarity(query_vec, dv) for dv in doc_vecs]
+
     max_sim = max(sims)
     mean_sim = sum(sims) / len(sims)
 
-    overlaps = [keyword_overlap_ratio(query, t) for t in doc_texts]
-    max_overlap = max(overlaps) if overlaps else 0.0
+    lexical_overlap = 0.0
+    if query_text and docs_text:
+        overlaps = [
+            keyword_overlap_ratio(query_text, d)
+            for d in docs_text
+        ]
+        lexical_overlap = max(overlaps)
 
+    # Conservative rules
     mismatch = (
-        max_sim < 0.70 or        # weak semantic similarity
-        mean_sim < 0.72 or
-        max_overlap < 0.15       # 🔥 topic anchor guard
+        max_sim < 0.65 or                  # clearly unrelated
+        mean_sim < 0.70 or                 # weak overall alignment
+        (max_sim < 0.75 and lexical_overlap < 0.15)
     )
 
     return {
         "score": round(max_sim, 3),
-        "mismatch": mismatch,
-        "lexical_overlap": round(max_overlap, 3)
+        "mean_score": round(mean_sim, 3),
+        "lexical_overlap": round(lexical_overlap, 3),
+        "mismatch": mismatch
     }
+
 
 
 def decision_engine(distribution, redundancy, mismatch, drift=None):
@@ -459,9 +468,11 @@ def confidence_score(dist, redundancy, mismatch, meaning_drift, drift):
     # Redundancy (0–1)
     risk += min(0.15, float(redundancy.get("score", 0)))
 
-    # Semantic mismatch
+    # Semantic mismatch — HARD SAFETY PENALTY
     if mismatch.get("mismatch"):
-        risk += 0.45
+        # If semantic mismatch exists, confidence must be unsafe
+        risk = max(risk, 0.85)
+
     # Reward strong alignment (retrieval mode)
     if not mismatch.get("mismatch") and dist.get("mean", 0) > 0.74:
         risk -= 0.15
@@ -500,10 +511,10 @@ def run_single_scan(request: ScanRequest):
     dist = analyze_distribution(sims)
     redundancy = redundancy_score(doc_vectors)
     mismatch = semantic_mismatch(
-    request.query,
-    request.retrieved_texts or [],
     query_vec,
-    doc_vectors
+    doc_vectors,
+    query_text=request.query,
+    docs_text=request.retrieved_texts
 )
 
     # drift (if you already have it wired)
