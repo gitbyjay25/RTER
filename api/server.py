@@ -95,8 +95,8 @@ class PairScanRequest(BaseModel):
     rewritten: str
 
 def run_pair_scan(original: str, rewritten: str):
-    q = dummy_embed(original)
-    r = dummy_embed(rewritten)
+    q = embed(original)
+    r = embed(rewritten)
 
     meaning_drift = meaning_drift_score(q, r)
 
