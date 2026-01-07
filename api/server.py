@@ -163,7 +163,7 @@ def suggested_actions_from_reasons(reason_codes: list[str]):
     actions = set()
 
     for code in reason_codes:
-        code = code.strip().upper()  # 👈 NORMALIZE
+        code = code.strip().upper()  #  NORMALIZE
 
         if code == "COLLAPSED_DISTRIBUTION":
             actions.update([
@@ -479,6 +479,16 @@ def confidence_score(dist, redundancy, mismatch, meaning_drift, drift):
     confidence = round(1.0 - risk, 3)
     return max(0.1, confidence)
 
+def confidence_band(confidence: float):
+    if confidence >= 0.85:
+        return "high"
+    elif confidence >= 0.6:
+        return "medium"
+    elif confidence >= 0.4:
+        return "low"
+    else:
+        return "unsafe"
+
 def run_single_scan(request: ScanRequest):
     # resolve + validate
     query_vec, doc_vectors = resolve_embeddings(request)
@@ -545,6 +555,8 @@ def run_single_scan(request: ScanRequest):
         "suggested_actions": suggested_actions,
         "drift": drift,
         "confidence": confidence,
+        "confidence_band": confidence_band(confidence)
+
 
     }
 
