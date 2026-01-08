@@ -1,6 +1,8 @@
 # Licensed under the Apache License, Version 2.0
 # See LICENSE file in the project root for full license information.
 
+from dotenv import load_dotenv
+load_dotenv()
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List

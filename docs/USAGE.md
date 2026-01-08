@@ -139,3 +139,15 @@ curl -X POST http://localhost:8000/scan \
 ```Bash
 curl http://localhost:8000/metrics
 ```
+## Configuration (Environment Variables)
+
+RTER supports configuration via environment variables.
+
+To customize thresholds:
+
+```bash
+cp .env.example .env
+```
+Edit .env as needed and restart the service.
+
+If no .env is provided, safe defaults are used.

@@ -4,3 +4,4 @@ numpy
 prometheus-client
 sentence-transformers
 tf-keras
+python-dotenv
