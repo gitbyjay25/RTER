@@ -1,4 +1,4 @@
-# RTER — Real-Time Embedding & Retrieval Error Scanner
+## RTER — Real-Time Embedding & Retrieval Error Scanner
 
 RTER is a **production-grade ML microservice** that detects **silent failures** in
 embedding-based retrieval systems (RAG, semantic search, recommendations) **before**
